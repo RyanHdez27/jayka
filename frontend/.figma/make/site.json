@@ -1,0 +1,11 @@
+{
+  "title": "Jayka",
+  "description": "Showcases a modern, responsive design for an interior design and custom carpentry studio, featuring services, a blog, and easy contact options.",
+  "robots": {
+    "index": false
+  },
+  "accessibility": {
+    "addBypassLinks": false,
+    "ignoreReducedMotion": false
+  }
+}
