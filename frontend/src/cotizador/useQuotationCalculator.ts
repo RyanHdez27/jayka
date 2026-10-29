@@ -5,18 +5,21 @@ import type {
   DifficultyLevel,
   QuotationResult,
   QuotationLineItem,
+  StandardizedServicesState,
+  ShippingConfig,
 } from './quotation.types';
 import {
   JAYKA_SERVICES,
-  CUSTOM_AREA_SERVICES,
-  DIFFICULTY_FACTORS,
-  DEMOLITION_COST_PER_M2,
-  DEBRIS_REMOVAL_COST_PER_M2,
-  ADMIN_RATE,
-  IMPREVISTOS_RATE,
-  UTILIDAD_RATE,
-  IVA_RATE,
-  M2_PER_DAY_ESTIMATE,
+  KITCHEN_PRICE_PER_ML,
+  KITCHEN_DEDUCTION_SUPERIOR_L,
+  KITCHEN_DEDUCTION_INFERIOR_L,
+  CLOSET_PRICE_PER_M2,
+  DOOR_PRICE_UNDER_90,
+  DOOR_PRICE_OVER_90,
+  TV_UNIT_PRICE_PER_SHEET,
+  QUALITY_OPTIONS,
+  DEFAULT_FUEL_RATE_PER_KM,
+  DEFAULT_TOLL_COST,
 } from './pricingData';
 
 export interface CalculatorInput {
@@ -24,10 +27,12 @@ export interface CalculatorInput {
   areaM2: number;
   serviceAreas: Partial<Record<ServiceCategory, number>>;
   bathroomCount: number;
+  standardizedState?: StandardizedServicesState;
   qualityTier: QualityTier;
-  difficulty: DifficultyLevel;
-  includesDemolition: boolean;
-  includesDebrisRemoval: boolean;
+  shipping?: ShippingConfig;
+  difficulty?: DifficultyLevel;
+  includesDemolition?: boolean;
+  includesDebrisRemoval?: boolean;
 }
 
 export function calculateQuotation(input: CalculatorInput): QuotationResult {
@@ -36,97 +41,216 @@ export function calculateQuotation(input: CalculatorInput): QuotationResult {
     areaM2,
     serviceAreas,
     bathroomCount,
+    standardizedState,
     qualityTier,
-    difficulty,
-    includesDemolition,
-    includesDebrisRemoval,
+    shipping,
   } = input;
 
-  const M2_PER_BATHROOM = 3.5;
+  const qualityOption = QUALITY_OPTIONS.find((q) => q.value === qualityTier);
+  const qualityFactor = qualityOption ? qualityOption.factor : 1.0;
 
-  // 1. Desglose de partidas (Line Items)
-  const lineItems: QuotationLineItem[] = selectedServices.map((svcId) => {
-    const svc = JAYKA_SERVICES.find((s) => s.id === svcId);
-    if (!svc) {
-      return { service: svcId, area: areaM2, unitPrice: 0, subtotal: 0 };
-    }
+  const lineItems: QuotationLineItem[] = [];
 
-    const unitPrice = svc.pricing[qualityTier].totalM2;
+  for (const svcId of selectedServices) {
+    if (svcId === 'cocinas') {
+      const kState = standardizedState?.kitchen;
+      const shape = kState?.shape ?? 'lineal';
+      let effectiveMl = 3.0;
+      let details = 'Cocina lineal (mueble superior, inferior y mesón)';
 
-    let effectiveArea: number;
-    if (svcId === 'divisiones_bano') {
-      effectiveArea = (bathroomCount > 0 ? bathroomCount : 1) * M2_PER_BATHROOM;
-    } else if (CUSTOM_AREA_SERVICES.includes(svcId) && (serviceAreas[svcId] ?? 0) > 0) {
-      effectiveArea = serviceAreas[svcId]!;
+      if (shape === 'lineal') {
+        effectiveMl = kState?.linearMeters && kState.linearMeters > 0 ? kState.linearMeters : 3.0;
+        details = `Cocina lineal de ${effectiveMl.toFixed(2)} ml (mueble sup. e inf.)`;
+      } else {
+        const ladoA = kState?.ladoA && kState.ladoA > 0 ? kState.ladoA : 2.5;
+        const ladoB = kState?.ladoB && kState.ladoB > 0 ? kState.ladoB : 2.0;
+        const totalL = ladoA + ladoB;
+        const supMl = Math.max(0.2, totalL - KITCHEN_DEDUCTION_SUPERIOR_L);
+        const infMl = Math.max(0.2, totalL - KITCHEN_DEDUCTION_INFERIOR_L);
+        effectiveMl = Math.round(((supMl + infMl) / 2) * 100) / 100;
+        details = `Cocina en L (${ladoA.toFixed(2)}m + ${ladoB.toFixed(2)}m) · Sup: ${supMl.toFixed(2)}ml (-0.30m) · Inf: ${infMl.toFixed(2)}ml (-0.60m)`;
+      }
+
+      const unitPrice = Math.round(KITCHEN_PRICE_PER_ML * qualityFactor);
+      const subtotal = Math.round(effectiveMl * unitPrice);
+
+      lineItems.push({
+        service: 'Mobiliario de Cocina Integral',
+        details,
+        area: effectiveMl,
+        unit: 'ml',
+        unitPrice,
+        subtotal,
+      });
+    } else if (svcId === 'closets') {
+      const cState = standardizedState?.closet;
+      const width = cState?.width && cState.width > 0 ? cState.width : 2.0;
+      const height = cState?.height && cState.height > 0 ? cState.height : 2.3;
+      const effectiveArea =
+        cState?.m2 && cState.m2 > 0 ? cState.m2 : Math.round(width * height * 100) / 100;
+      const details = `Closet a medida (${width.toFixed(2)}m ancho × ${height.toFixed(2)}m alto)`;
+
+      const unitPrice = Math.round(CLOSET_PRICE_PER_M2 * qualityFactor);
+      const subtotal = Math.round(effectiveArea * unitPrice);
+
+      lineItems.push({
+        service: 'Closets & Vestieres',
+        details,
+        area: effectiveArea,
+        unit: 'm²',
+        unitPrice,
+        subtotal,
+      });
+    } else if (svcId === 'puertas') {
+      const dState = standardizedState?.doors;
+      const under90 = dState ? dState.under90 : 1;
+      const over90 = dState ? dState.over90 : 0;
+
+      if (under90 > 0) {
+        const unitPrice = Math.round(DOOR_PRICE_UNDER_90 * qualityFactor);
+        lineItems.push({
+          service: 'Puertas Entamboradas (≤ 90 cm)',
+          details: 'Puertas entamboradas estándar con marco, cerradura e instalación',
+          area: under90,
+          unit: 'und',
+          unitPrice,
+          subtotal: under90 * unitPrice,
+        });
+      }
+
+      if (over90 > 0) {
+        const unitPrice = Math.round(DOOR_PRICE_OVER_90 * qualityFactor);
+        lineItems.push({
+          service: 'Puertas Entamboradas (> 90 cm)',
+          details: 'Puertas entamboradas de gran formato con marco e instalación',
+          area: over90,
+          unit: 'und',
+          unitPrice,
+          subtotal: over90 * unitPrice,
+        });
+      }
+
+      if (under90 === 0 && over90 === 0) {
+        const unitPrice = Math.round(DOOR_PRICE_UNDER_90 * qualityFactor);
+        lineItems.push({
+          service: 'Puerta Entamborada Estándar',
+          details: 'Puerta de paso con marco e instalación',
+          area: 1,
+          unit: 'und',
+          unitPrice,
+          subtotal: unitPrice,
+        });
+      }
+    } else if (svcId === 'centros_tv') {
+      const tvState = standardizedState?.tvUnit;
+      const sheetsCount = tvState?.sheetsCount && tvState.sheetsCount > 0 ? tvState.sheetsCount : 1;
+      const details = `${sheetsCount} lámina(s) de material · Todo incluido: tableros, herrajes, transporte y mano de obra`;
+
+      const unitPrice = Math.round(TV_UNIT_PRICE_PER_SHEET * qualityFactor);
+      const subtotal = Math.round(sheetsCount * unitPrice);
+
+      lineItems.push({
+        service: 'Centro de Entretenimiento & TV',
+        details,
+        area: sheetsCount,
+        unit: 'láminas',
+        unitPrice,
+        subtotal,
+      });
     } else {
-      effectiveArea = areaM2 > 0 ? areaM2 : 1;
+      // Otros servicios del catálogo
+      const svc = JAYKA_SERVICES.find((s) => s.id === svcId);
+      if (svc) {
+        let effArea = areaM2 > 0 ? areaM2 : 1;
+        if (svcId === 'divisiones_bano') {
+          effArea = (bathroomCount > 0 ? bathroomCount : 1) * 3.5;
+        } else if (serviceAreas[svcId] && serviceAreas[svcId]! > 0) {
+          effArea = serviceAreas[svcId]!;
+        }
+
+        const unitPrice = Math.round(svc.pricing[qualityTier].totalM2 * qualityFactor);
+        const subtotal = Math.round(effArea * unitPrice);
+
+        lineItems.push({
+          service: svc.label,
+          details: svc.description,
+          area: effArea,
+          unit: svc.unit,
+          unitPrice,
+          subtotal,
+        });
+      }
     }
+  }
 
-    return {
-      service: svc.label,
-      area: effectiveArea,
-      unitPrice,
-      subtotal: Math.round(effectiveArea * unitPrice),
-    };
-  });
-
-  // 2. Subtotal de partidas directas
+  // Subtotal de partidas directas
   const subtotalServices = lineItems.reduce((acc, li) => acc + li.subtotal, 0);
 
-  // 3. Recargo por dificultad de acceso
-  const difficultyMultiplier = DIFFICULTY_FACTORS[difficulty] ?? 1.0;
-  const difficultyAmount = Math.round(subtotalServices * (difficultyMultiplier - 1));
+  // ── LOGÍSTICA DE ENVÍO Y DOMICILIO (PASO 4) ──────────────────────
+  let shippingCost = 0;
+  let shippingDetails = 'Envío urbano en Villavicencio (Incluido)';
+  const shippingZone = shipping?.zone ?? 'villavicencio';
+  const destinationCity = shipping?.destinationCity || (shippingZone === 'villavicencio' ? 'Villavicencio' : 'Fuera de ciudad');
+  const distanceKm = shipping?.distanceKm ?? 0;
+  const tollCount = shipping?.tollCount ?? 0;
 
-  // 4. Extras opcionales (Demolición y retiro)
-  const demolitionCost = includesDemolition ? Math.round(areaM2 * DEMOLITION_COST_PER_M2) : 0;
-  const debrisRemovalCost = includesDebrisRemoval ? Math.round(areaM2 * DEBRIS_REMOVAL_COST_PER_M2) : 0;
+  if (shippingZone === 'villavicencio') {
+    shippingCost = 0;
+    shippingDetails = 'Envío e instalación en Villavicencio (100% Incluido)';
+  } else {
+    const fuelRate = shipping?.fuelCostPerKm && shipping.fuelCostPerKm > 0 ? shipping.fuelCostPerKm : DEFAULT_FUEL_RATE_PER_KM;
+    const tollCostEach = shipping?.tollCostEach && shipping.tollCostEach > 0 ? shipping.tollCostEach : DEFAULT_TOLL_COST;
+    const fuelCost = Math.round(distanceKm * fuelRate);
+    const tollsTotal = Math.round(tollCount * tollCostEach);
+    shippingCost = fuelCost + tollsTotal;
 
-  // 5. Costo Directo Total antes de AIU
-  const subtotalBeforeMargin =
-    subtotalServices + difficultyAmount + demolitionCost + debrisRemovalCost;
+    const tollText = tollCount > 0 ? ` + ${tollCount} peaje(s)` : ' (sin peajes)';
+    shippingDetails = `Transporte a ${destinationCity} (${distanceKm} km combustible${tollText})`;
+  }
 
-  // 6. Desglose AIU (Administración 7%, Imprevistos 3%, Utilidad 5%)
-  const adminAmount = Math.round(subtotalBeforeMargin * ADMIN_RATE);
-  const imprevistosAmount = Math.round(subtotalBeforeMargin * IMPREVISTOS_RATE);
-  const utilidadAmount = Math.round(subtotalBeforeMargin * UTILIDAD_RATE);
+  const subtotalBeforeMargin = subtotalServices + shippingCost;
+  const isAllInclusive = true;
+  const subtotalBeforeTax = subtotalBeforeMargin;
+  const grandTotal = subtotalBeforeTax;
 
-  // 7. IVA (19% exclusivamente sobre la Utilidad legal)
-  const ivaAmount = Math.round(utilidadAmount * IVA_RATE);
-
-  // 8. Subtotal antes de IVA
-  const subtotalBeforeTax =
-    subtotalBeforeMargin + adminAmount + imprevistosAmount + utilidadAmount;
-
-  // 9. Total estimado final
-  const grandTotal = subtotalBeforeTax + ivaAmount;
-
-  // 10. Tiempo estimado de ejecución
-  const totalEffectiveArea = lineItems.reduce((sum, item) => sum + item.area, 0);
-  const baseDays = Math.ceil(totalEffectiveArea / M2_PER_DAY_ESTIMATE);
-  const estimatedDays = Math.max(5, baseDays);
+  // Estimado de días de producción e instalación
+  const totalAreaOrUnits = lineItems.reduce((sum, item) => sum + item.area, 0);
+  const baseDays = Math.max(6, Math.ceil(totalAreaOrUnits * 1.5));
+  const estimatedDays = shippingZone === 'fuera' ? baseDays + 1 : baseDays;
 
   return {
     lineItems,
     subtotalServices,
-    difficultyMultiplier,
-    difficultyAmount,
-    demolitionCost,
-    debrisRemovalCost,
+
+    // Envío y Logística
+    shippingCost,
+    shippingDetails,
+    shippingZone,
+    destinationCity,
+    distanceKm,
+    tollCount,
+
+    // Compatibilidad
+    difficultyMultiplier: 1.0,
+    difficultyAmount: 0,
+    demolitionCost: 0,
+    debrisRemovalCost: 0,
     subtotalBeforeMargin,
 
-    adminRate: ADMIN_RATE,
-    adminAmount,
-    imprevistosRate: IMPREVISTOS_RATE,
-    imprevistosAmount,
-    utilidadRate: UTILIDAD_RATE,
-    utilidadAmount,
-    ivaRate: IVA_RATE,
-    ivaAmount,
+    isAllInclusive,
+    adminRate: 0,
+    adminAmount: 0,
+    imprevistosRate: 0,
+    imprevistosAmount: 0,
+    utilidadRate: 0,
+    utilidadAmount: 0,
+    ivaRate: 0,
+    ivaAmount: 0,
 
-    margin: ADMIN_RATE + IMPREVISTOS_RATE + UTILIDAD_RATE,
-    marginAmount: adminAmount + imprevistosAmount + utilidadAmount,
+    margin: 0,
+    marginAmount: 0,
     subtotalBeforeTax,
-    iva: IVA_RATE,
+    iva: 0,
     grandTotal,
     estimatedDays,
   };
@@ -138,9 +262,8 @@ export function useQuotationCalculator(input: CalculatorInput): QuotationResult 
     input.areaM2,
     input.serviceAreas,
     input.bathroomCount,
+    input.standardizedState,
     input.qualityTier,
-    input.difficulty,
-    input.includesDemolition,
-    input.includesDebrisRemoval,
+    input.shipping,
   ]);
 }

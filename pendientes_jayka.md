@@ -8,7 +8,7 @@
 
 | # | Tarea | Estado | Prioridad |
 |---|-------|--------|-----------|
-| 1 | API de Noticias — integración con filtros de diseño de interiores | 🔴 Pendiente | Alta |
+| 1 | API de Noticias — integración con filtros de diseño de interiores | 🟢 Completado | Alta |
 | 2 | Componentes embebidos de Términos y Condiciones + Tratamiento de Datos | 🔴 Pendiente | Alta |
 
 ---
@@ -20,27 +20,20 @@ Conectar una fuente externa de noticias (p.ej. NewsAPI, GNews, o similar) al mó
 
 ### Subtareas
 
-- [ ] **Elegir proveedor de API de noticias**
-  - Opciones: [NewsAPI.org](https://newsapi.org), [GNews](https://gnews.io), [Mediastack](https://mediastack.com)
-  - Verificar plan gratuito vs. pago, límites de peticiones y soporte en español
+- [x] **Elegir proveedor de API de noticias**
+  - GNews.io (Soporta CORS en producción para Hostinger, filtrado en español `lang=es`).
 
-- [ ] **Definir keywords / categorías de filtro**
-  - Palabras clave sugeridas: `diseño de interiores`, `decoración`, `interiorismo`, `mobiliario`, `carpintería`, `tendencias hogar`
-  - Considerar filtros por idioma (`es`) y región (Colombia / Latam)
+- [x] **Definir keywords / categorías de filtro**
+  - Segmentado en: `Todas`, `Interiorismo & Tendencias`, `Cocinas Modernas`, `Closets & Almacenamiento`, `Mobiliario a Medida`.
 
-- [ ] **Crear endpoint en el backend (Laravel)**
-  - Ruta sugerida: `GET /api/v1/news`
-  - Parámetros: `?category=interiorismo&page=1&per_page=10`
-  - Usar un **Job programado** (Laravel Scheduler) para cachear resultados cada X horas y no exceder límites de la API
+- [x] **Crear servicio con caché inteligente (localStorage TTL 2h)**
+  - Servicio `newsService.ts` implementado con fallback enriquecido curado de revistas de diseño (AD, El Mueble, Houzz) para que nunca se quede vacía la web.
 
-- [ ] **Crear componente en el frontend**
-  - Sección "Inspiración / Noticias" en la landing o en la sección del blog
-  - Tarjetas con imagen, título, fuente y enlace externo
-  - Skeleton loader mientras carga
+- [x] **Crear componente en el frontend**
+  - Componente `NewsSection.tsx` con tabs por categoría, skeleton loader, cuadrícula moderna de tarjetas, fotos en alta resolución con zoom hover y enlace directo a la fuente externa original en nueva pestaña (`target="_blank"`).
 
-- [ ] **Variables de entorno**
-  - Agregar `NEWS_API_KEY` al `.env` del backend
-  - Documentar en `.env.example`
+- [x] **Variables de entorno**
+  - Variable `VITE_GNEWS_API_KEY` agregada en `.env`, `.env.example` y `.env.production`.
 
 ### Notas
 > El endpoint existente `GET /api/v1/posts` maneja el blog propio. Las noticias externas deberían ser un endpoint separado para no mezclar contenido editorial propio con contenido curado.

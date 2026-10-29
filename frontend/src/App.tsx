@@ -1,8 +1,10 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
+import emailjs from '@emailjs/browser'
 import logo from './assets/jayka-logo.png'
 import { api } from './services/api'
 import { CotizadorModal } from './cotizador/CotizadorModal'
 import { LegalModal, type LegalModalType } from './components/LegalModal'
+import { NewsSection } from './components/NewsSection'
 
 // URL base del backend — usa .env en local y .env.production al hacer build
 const BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
@@ -778,6 +780,8 @@ export default function App() {
   const [menuOpen, setMenuOpen] = useState(false)
   const [form, setForm] = useState({ name: '', email: '', message: '' })
   const [sent, setSent] = useState(false)
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [formError, setFormError] = useState<string | null>(null)
 
   // Cotizador Modal State
   const [isCotizadorOpen, setIsCotizadorOpen] = useState(false)
@@ -824,13 +828,66 @@ export default function App() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
+    setIsSubmitting(true)
+    setFormError(null)
+
+    const serviceId = import.meta.env.VITE_EMAILJS_SERVICE_ID
+    const templateId = import.meta.env.VITE_EMAILJS_TEMPLATE_ID
+    const publicKey = import.meta.env.VITE_EMAILJS_PUBLIC_KEY
+    const autoReplyTemplateId = import.meta.env.VITE_EMAILJS_AUTOREPLY_TEMPLATE_ID
+
+    if (!serviceId || !templateId || !publicKey) {
+      setFormError('Las credenciales de EmailJS no están configuradas en las variables de entorno.')
+      setIsSubmitting(false)
+      return
+    }
+
     try {
-      await api.submitLead(form)
+      const templateParams = {
+        name: form.name,
+        email: form.email,
+        message: form.message,
+        reply_to: form.email,
+        date: new Date().toLocaleString('es-CO', {
+          year: 'numeric',
+          month: 'long',
+          day: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit',
+        }),
+      }
+
+      // Enviar correo de notificación a Jayka
+      const emailTasks: Promise<any>[] = [
+        emailjs.send(serviceId, templateId, templateParams, publicKey)
+      ]
+
+      // Si se configuró la plantilla de confirmación al cliente, enviarla también
+      if (autoReplyTemplateId) {
+        emailTasks.push(
+          emailjs.send(serviceId, autoReplyTemplateId, templateParams, publicKey)
+        )
+      }
+
+      await Promise.all(emailTasks)
+
+      // Guardado opcional en backend Laravel si está activo
+      try {
+        await api.submitLead(form)
+      } catch (backendErr) {
+        // Silencioso si el backend Laravel no está disponible en producción
+        console.warn('Backend Laravel no disponible para guardar lead:', backendErr)
+      }
+
       setSent(true)
       setForm({ name: '', email: '', message: '' })
-      setTimeout(() => setSent(false), 4000)
-    } catch (e: any) {
-      alert(e.message)
+      setTimeout(() => setSent(false), 5000)
+    } catch (err: any) {
+      console.error('Error al enviar mensaje con EmailJS:', err)
+      const errorMsg = err?.text || err?.message || 'Hubo un error al enviar tu mensaje. Por favor intenta de nuevo.'
+      setFormError(errorMsg)
+    } finally {
+      setIsSubmitting(false)
     }
   }
 
@@ -1079,69 +1136,8 @@ export default function App() {
         ))}
       </div>
 
-      {/* ─── BLOG (STACK CARDS) ─── */}
-      <section id="blog" className="py-28" style={{ background: '#F7F6F2' }}>
-        <div className="max-w-4xl mx-auto px-6">
-          <div className="flex flex-col md:flex-row md:items-end justify-between mb-14 gap-6">
-            <div>
-              <div className="flex items-center gap-3 mb-4">
-                <span className="h-px w-10" style={{ background: '#2CB99B' }} />
-                <span className="text-xs tracking-[0.2em] uppercase font-medium" style={{ color: '#2CB99B' }}>
-                  Revista Jayka
-                </span>
-              </div>
-              <h2
-                className="font-bold"
-                style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 'clamp(1.8rem, 3.5vw, 2.8rem)', letterSpacing: '-0.02em' }}
-              >
-                Ideas, proyectos y tendencias
-              </h2>
-            </div>
-            <a href="#blog" className="text-sm font-medium" style={{ color: '#2CB99B' }}>
-              Ver todos los artículos →
-            </a>
-          </div>
-
-          {posts.length > 0 ? (
-            <StackCardCarousel posts={posts} />
-          ) : (
-            <StackCardCarousel posts={[
-              {
-                title: 'Tendencias en cocinas 2026',
-                excerpt: 'Las cocinas modernas apuestan por materiales naturales, islas funcionales y colores tierra que aportan calidez y distinción.',
-                image_url: 'https://images.unsplash.com/photo-1556909114-f6e7ad7d3136?w=800&h=480&fit=crop',
-                category: { name: 'Cocinas' },
-                published_at: 'Sep 2026',
-                read_time: '4 min',
-              },
-              {
-                title: 'Cómo elegir el closet perfecto',
-                excerpt: 'El almacenamiento inteligente transforma tu habitación. Te guiamos para elegir entre sistemas corredizos, abatibles y walk-in.',
-                image_url: 'https://images.unsplash.com/photo-1558997519-83ea9252eeb8?w=800&h=480&fit=crop',
-                category: { name: 'Closets' },
-                published_at: 'Ago 2026',
-                read_time: '5 min',
-              },
-              {
-                title: 'Diseño de oficinas en casa',
-                excerpt: 'El home office llegó para quedarse. Descubre cómo crear un espacio productivo y elegante con mobiliario a medida.',
-                image_url: 'https://images.unsplash.com/photo-1593642632559-0c6d3fc62b89?w=800&h=480&fit=crop',
-                category: { name: 'Oficinas' },
-                published_at: 'Jul 2026',
-                read_time: '6 min',
-              },
-              {
-                title: 'Madera natural vs MDF: ¿cuál elegir?',
-                excerpt: 'Analizamos los pros y contras de los materiales más usados en carpintería a medida para ayudarte a tomar la mejor decisión.',
-                image_url: 'https://images.unsplash.com/photo-1616486338812-3dadae4b4ace?w=800&h=480&fit=crop',
-                category: { name: 'Tips' },
-                published_at: 'Jun 2026',
-                read_time: '3 min',
-              },
-            ]} />
-          )}
-        </div>
-      </section>
+      {/* ─── REVISTA & NOTICIAS DE DISEÑO ─── */}
+      <NewsSection />
 
       {/* ─── CONTACT ─── */}
       <section id="contacto" style={{ background: '#fff', padding: '7rem 0' }}>
@@ -1215,10 +1211,23 @@ export default function App() {
 
           <form onSubmit={handleSubmit} className="rounded-2xl p-8 space-y-5" style={{ background: '#F7F6F2', border: '1px solid #E2E0D9' }}>
             {sent && (
-              <div className="rounded-xl p-4 text-sm font-medium" style={{ background: '#E6F7F4', color: '#1E9A81' }}>
-                ¡Mensaje enviado! Te contactaremos pronto.
+              <div className="rounded-xl p-4 text-sm font-medium flex items-center gap-3" style={{ background: '#E6F7F4', color: '#1E9A81', border: '1px solid #B8EADF' }}>
+                <svg className="w-5 h-5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7" />
+                </svg>
+                <span>¡Mensaje enviado con éxito! Te contactaremos muy pronto.</span>
               </div>
             )}
+
+            {formError && (
+              <div className="rounded-xl p-4 text-sm font-medium flex items-center gap-3" style={{ background: '#FEE2E2', color: '#991B1B', border: '1px solid #F87171' }}>
+                <svg className="w-5 h-5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                </svg>
+                <span>{formError}</span>
+              </div>
+            )}
+
             {[
               { label: 'Nombre', type: 'text', key: 'name', placeholder: 'Tu nombre completo' },
               { label: 'Correo electrónico', type: 'email', key: 'email', placeholder: 'tu@correo.com' },
@@ -1230,10 +1239,11 @@ export default function App() {
                 <input
                   type={field.type}
                   required
+                  disabled={isSubmitting}
                   value={(form as any)[field.key]}
                   onChange={e => setForm(f => ({ ...f, [field.key]: e.target.value }))}
                   placeholder={field.placeholder}
-                  className="w-full px-4 py-3 rounded-xl text-sm outline-none transition-all"
+                  className="w-full px-4 py-3 rounded-xl text-sm outline-none transition-all disabled:opacity-60 disabled:cursor-not-allowed"
                   style={{ background: '#fff', border: '1.5px solid #E2E0D9', color: '#1A1A1A', fontFamily: "'Outfit', sans-serif" }}
                   onFocus={e => (e.target.style.borderColor = '#2CB99B')}
                   onBlur={e => (e.target.style.borderColor = '#E2E0D9')}
@@ -1246,11 +1256,12 @@ export default function App() {
               </label>
               <textarea
                 required
+                disabled={isSubmitting}
                 rows={5}
                 value={form.message}
                 onChange={e => setForm(f => ({ ...f, message: e.target.value }))}
                 placeholder="Cuéntanos sobre tu proyecto..."
-                className="w-full px-4 py-3 rounded-xl text-sm outline-none transition-all resize-none"
+                className="w-full px-4 py-3 rounded-xl text-sm outline-none transition-all resize-none disabled:opacity-60 disabled:cursor-not-allowed"
                 style={{ background: '#fff', border: '1.5px solid #E2E0D9', color: '#1A1A1A', fontFamily: "'Outfit', sans-serif" }}
                 onFocus={e => (e.target.style.borderColor = '#2CB99B')}
                 onBlur={e => (e.target.style.borderColor = '#E2E0D9')}
@@ -1258,10 +1269,18 @@ export default function App() {
             </div>
             <button
               type="submit"
-              className="w-full py-4 rounded-xl text-sm font-semibold transition-all hover:opacity-90 hover:shadow-lg"
+              disabled={isSubmitting}
+              className="w-full py-4 rounded-xl text-sm font-semibold transition-all hover:opacity-90 hover:shadow-lg disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-2"
               style={{ background: '#2CB99B', color: '#fff', fontFamily: "'DM Sans', sans-serif" }}
             >
-              Enviar mensaje
+              {isSubmitting ? (
+                <>
+                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  <span>Enviando mensaje...</span>
+                </>
+              ) : (
+                'Enviar mensaje'
+              )}
             </button>
           </form>
         </div>
